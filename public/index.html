@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Live Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: sans-serif; background: #111; color: white; text-align: center; }
+    input, button { font-size: 1.2em; margin: 5px; }
+    .arrow { font-size: 3em; transform-origin: center; }
+    .user { margin: 15px 0; }
+  </style>
+</head>
+<body>
+  <h1>🧭 Live People Tracker</h1>
+  <input id="room" placeholder="Room name" />
+  <input id="name" placeholder="Your nickname" />
+  <button onclick="start()">Join</button>
+  <div id="arrows"></div>
+
+  <script>
+    let lat = 0, lon = 0, heading = 0, socket, room, name;
+
+    function start() {
+      room = document.getElementById("room").value.trim();
+      name = document.getElementById("name").value.trim();
+      if (!room || !name) return alert("Enter room and nickname");
+
+      socket = new WebSocket(`ws://${location.host}`);
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: 'join', room, name }));
+        navigator.geolocation.watchPosition(pos => {
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+          sendUpdate();
+        });
+        window.addEventListener("deviceorientationabsolute", e => {
+          if (e.alpha != null) heading = 360 - e.alpha;
+        }, true);
+        setInterval(sendUpdate, 2000);
+      };
+
+      socket.onmessage = (msg) => {
+        const data = JSON.parse(msg.data);
+        if (data.type === 'users') showOthers(data.users);
+      };
+
+      document.querySelector("button").disabled = true;
+    }
+
+    function sendUpdate() {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'update',
+          lat, lon, heading
+        }));
+      }
+    }
+
+    function showOthers(users) {
+      const arrows = document.getElementById("arrows");
+      arrows.innerHTML = "";
+      Object.entries(users).forEach(([otherName, data]) => {
+        if (otherName === name) return;
+        const dist = haversine(lat, lon, data.lat, data.lon);
+        const bearing = calculateBearing(lat, lon, data.lat, data.lon);
+        const rel = (bearing - heading + 360) % 360;
+
+        const div = document.createElement("div");
+        div.className = "user";
+        const arrow = document.createElement("div");
+        arrow.className = "arrow";
+        arrow.textContent = "⬆️";
+        arrow.style.transform = `rotate(${rel}deg)`;
+        const label = document.createElement("div");
+        label.textContent = `${otherName}: ${dist.toFixed(1)} m`;
+        div.appendChild(arrow);
+        div.appendChild(label);
+        arrows.appendChild(div);
+      });
+    }
+
+    function toRad(deg) { return deg * Math.PI / 180; }
+    function toDeg(rad) { return rad * 180 / Math.PI; }
+
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function calculateBearing(lat1, lon1, lat2, lon2) {
+      const dLon = toRad(lon2 - lon1);
+      const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+      const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+      return (toDeg(Math.atan2(y, x)) + 360) % 360;
+    }
+  </script>
+</body>
+</html>
